@@ -25,12 +25,18 @@ class MovebankAPI
     KStudyKeyMainLocLongitude = "main_location_long"
     KStudyKeyName             = "name"
     KStudyKeyTags             = "number_of_tags"
+    # For (single) Study
+    # acknowledgements,citation,create_ts,event_grace_period,go_public_date,go_public_license_type,grants_used,has_quota,i_am_owner,id,is_test,license_terms,license_type,main_location_lat,main_location_long,name,number_of_deployments,number_of_individuals,number_of_tags,principal_investigator_address,principal_investigator_email,principal_investigator_name,study_objective,study_type,suspend_go_public_date,suspend_license_terms,i_can_see_data,there_are_data_which_i_cannot_see,timestamp_first_deployed_location,timestamp_last_deployed_location,number_of_deployed_locations,taxon_ids,sensor_type_ids
+    KKeyStudyStudy  = "study"
+    KKeyStudyTags   = "tags"
 
     # For TagTypes
     # description,external_id,id,is_location_sensor,name
     KTagTypeKeyID = "id"
     KTagTypeKeyIsLocationSensor = "is_location_sensor"
     KTagTypeKeyName             = "name"
+    # For (single) Study
+    KTagTypeKeyLocalIdentifier  = "local_identifier"
 
     # For Taxonomies
     # author_string,canonical_name,external_id,hierarchy_string,id,name_1,name_2,name_3,tsn,valid
@@ -46,6 +52,8 @@ class MovebankAPI
       @attributesParsed = nil
       @studiesBody    = ""
       @studiesParsed  = nil
+      @studyBodies    = {}
+      @studyParses    = {}
       @tagTypesBody   = ""
       @tagTypesParsed = nil
       @taxonomiesBody   = ""
@@ -80,6 +88,46 @@ class MovebankAPI
       end
 
       return false
+    end
+
+
+    def ReadStudy( studyIDin )
+      # Get a description about a study
+      @studyBodies[ studyIDin ] = {}
+
+      resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=study&study_id=#{studyIDin}" )
+      if resRequest.kind_of?( Net::HTTPSuccess )
+        @studyBodies[ studyIDin ][ KKeyStudyStudy ] = resRequest.body
+        #logger.info( "ReadStudy: studyIDin=#{studyIDin}  studyBody: #{ @studyBodies[ studyIDin ]}")
+        # if !parseStudy( studyIDin )
+        #   logger.error( "ReadStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
+        # end
+        # return true
+      else
+        logger.error( "ReadStudy: studyIDin=#{studyIDin}  description FAILED")
+        return false
+      end
+
+      # Get information about tags in a study
+      resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=tag&study_id=#{studyIDin}" )
+      if resRequest.kind_of?( Net::HTTPSuccess )
+        @studyBodies[ studyIDin ][ KKeyStudyTags ] = resRequest.body
+        #logger.info( "ReadStudy: studyIDin=#{studyIDin}  studyBody: #{ @studyBodies[ studyIDin ]}")
+        # if !parseStudy( studyIDin )
+        #   logger.error( "ReadStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
+        # end
+        # return true
+      else
+        logger.error( "ReadStudy: studyIDin=#{studyIDin}  description FAILED")
+        return false
+      end
+
+      if !parseStudy( studyIDin )
+        logger.error( "ReadStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
+        return false
+      end
+
+      return true
     end
 
 
@@ -154,6 +202,33 @@ class MovebankAPI
       end
 
       logger.info( "PrintStudies: descFilterIn=#{descFilterIn}  can/cannot see: #{countCanSee}/#{countCannotSee}" )
+    end
+
+
+    def PrintStudy( studyIDin )
+      if !@studyParses[ studyIDin ]
+        if !parseStudy( studyIDin )
+          logger.error( "PrintStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
+        end
+      end
+
+      logger.info( "PrintStudy: studyIDin=#{studyIDin}" )
+      # @studyParses[ studyIDin ][ KKeyStudyStudy ].each_value do |oneStudyElement|
+      studyOfInterest = @studyParses[ studyIDin ][ KKeyStudyStudy ]
+      logger.info( "PrintStudy: studyIDin=#{studyIDin}: id=#{studyOfInterest.field( KStudyKeyID )}  is_test: #{studyOfInterest.field( KStudyKeyIsTest )}" )
+      logger.info( "                      name: #{studyOfInterest.field( KStudyKeyName )}" )
+      logger.info( "                      i_can_see=#{studyOfInterest.field( KStudyKeyICanSee )}  some_cannot_see=#{studyOfInterest.field( KStudyKeyICannotSeeSome )}" )
+      logger.info( "                      main location lat=#{studyOfInterest.field( KStudyKeyMainLocLatitude )}  long=#{studyOfInterest.field( KStudyKeyMainLocLongitude )}" )
+      logger.info( "                      deployments=#{studyOfInterest.field( KStudyKeyDeployments )}  individuals=#{studyOfInterest.field( KStudyKeyIndividuals )}  tags=#{studyOfInterest.field( KStudyKeyTags )}" )
+      if studyOfInterest.field( KStudyKeyLicenseTerms ) && studyOfInterest.field( KStudyKeyLicenseTerms ).length > 2
+        logger.info( "                      license terms: #{studyOfInterest.field( KStudyKeyLicenseTerms )}" )
+      end
+
+      tagsOfInterest  = @studyParses[ studyIDin ][ KKeyStudyTags ]
+      logger.info( "PrintStudy: studyIDin=#{studyIDin}: tagsOfInterest count=#{tagsOfInterest.length}" )
+      tagsOfInterest.each_value do |oneTag|
+        logger.debug( "                      oneTag.id=#{oneTag.field( KTagTypeKeyID )}  local_identifier: #{oneTag.field( KTagTypeKeyLocalIdentifier )}" )
+      end
     end
 
 
@@ -285,6 +360,30 @@ class MovebankAPI
       end
 
       logger.info( "parseStudies: studiesParsed.length: #{@studiesParsed.length}" )
+      return true
+    end
+
+
+    def parseStudy( studyIDin )
+      if !@studyBodies[ studyIDin ][ KKeyStudyStudy ]
+        @studyParses[ studyIDin ] = nil
+        return false
+      end
+
+      @studyParses[ studyIDin ] = {}
+
+      CSV.parse( @studyBodies[ studyIDin ][ KKeyStudyStudy ], headers: true ) do |row|
+        logger.debug( "parseStudy: KKeyStudyStudy  studyIDin=#{studyIDin}  row.id: #{row[ KStudyKeyID ]}" )
+        @studyParses[ studyIDin ][ KKeyStudyStudy ] = row
+      end
+
+      @studyParses[ studyIDin ][ KKeyStudyTags ]  = {}
+      CSV.parse( @studyBodies[ studyIDin ][ KKeyStudyTags ], headers: true ) do |row|
+        logger.debug( "parseStudy: KKeyStudyTags  studyIDin=#{studyIDin}  row.id: #{row[ KStudyKeyID ]}" )
+        @studyParses[ studyIDin ][ KKeyStudyTags ][ row[ KStudyKeyID ]] = row
+      end
+
+      # logger.info( "parseStudies: studiesParsed.length: #{@studiesParsed.length}" )
       return true
     end
 

@@ -392,6 +392,7 @@ logger.info( "Settings.functions.attributes: #{Settings.functions.attributes}" )
 logger.info( "Settings.functions.studies:    #{Settings.functions.studies}" )
 logger.info( "Settings.functions.tagtypes:   #{Settings.functions.tagtypes}" )
 logger.info( "Settings.functions.taxonomies: #{Settings.functions.taxonomies}" )
+logger.info( "Settings.study.id: #{Settings.study.id}" )
 
 
 mvbank  = MovebankAPI.new( Settings.username, Settings.password )
@@ -431,4 +432,10 @@ if 0 != Settings.functions.taxonomies
   else
     logger.info( "mvbank.ReadTaxonomies: FAILED" )
   end
+end
+
+if mvbank.ReadStudy( Settings.study.id )
+  mvbank.PrintStudy( Settings.study.id )
+else
+  logger.info( "mvbank.ReadStudy: FAILED" )
 end
