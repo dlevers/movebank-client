@@ -29,11 +29,9 @@ module Logging
 end
 
 
-# class MyClass
-#   def say_hello
-#     puts "Hello World"
-#   end
-# end
+##############################################################################
+# class MovebankAPI
+##############################################################################
 class MovebankAPI
   include Logging
 
@@ -62,6 +60,19 @@ class MovebankAPI
   KStudyKeyName             = "name"
   KStudyKeyTags             = "number_of_tags"
 
+  # For TagTypes
+  # description,external_id,id,is_location_sensor,name
+  KTagTypeKeyID = "id"
+  KTagTypeKeyIsLocationSensor = "is_location_sensor"
+  KTagTypeKeyName             = "name"
+
+  # For Taxonomies
+  # author_string,canonical_name,external_id,hierarchy_string,id,name_1,name_2,name_3,tsn,valid
+  # "(Bleeker, 1864)","Canthigaster amboinensis",,"16762-261312088-261312089-817-18489-261312092-2031-2066-5385-10055-10160-10161-774077540-10187-10189",10189,"Canthigaster","amboinensis","",173321,true
+  KTaxonomyKeyID  = "id"
+  KTaxonomnyKeyCanonicalName  = "canonical_name"
+  
+
   def initialize( usernameIn, passwordIn )
     @mvbUsername    = usernameIn
     @mvbPassword    = passwordIn
@@ -69,34 +80,16 @@ class MovebankAPI
     @attributesParsed = nil
     @studiesBody    = ""
     @studiesParsed  = nil
+    @tagTypesBody   = ""
+    @tagTypesParsed = nil
+    @taxonomiesBody   = ""
+    @taxonomiesParsed = nil
   end
 
 
   def ReadAttributes
     # curl -v -u dlevers:stANley6 -b cookies.txt -o attribute_names.txt "https://www.movebank.org/movebank/service/direct-read?attributes"
     resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?attributes" )
-    # uri     = URI( 'https://www.movebank.org/movebank/service/direct-read?attributes' )
-    # req     = Net::HTTP::Get.new( uri )
-    # req.basic_auth( @mvbUsername, @mvbPassword )
-
-    # resGet  = Net::HTTP.start( uri.hostname,
-    #                         uri.port,
-    #                         :use_ssl => uri.scheme == 'https' ) { |http|
-    #   http.request( req )
-    # }
-
-    # bSuccess = false
-    # case resGet
-    #   when Net::HTTPSuccess
-    #     @attributesBody = resGet.body
-    #     bSuccess = true
-    #   when Net::HTTPUnauthorized
-    #     logger.error( "ReadAttributes: FAILED.HTTPUnauthorized - username and password set and correct?" )
-    #   when Net::HTTPServerError
-    #     logger.error( "ReadAttributes: FAILED.HTTPServerError - try again later?" )
-    #   else
-    #     logger.error( "ReadAttributes: FAILED.(unknown) - #{response.message}" )
-    # end
     if resRequest.kind_of?( Net::HTTPSuccess )
       @attributesBody = resRequest.body
       if !parseAttributes()
@@ -116,6 +109,37 @@ class MovebankAPI
       @studiesBody = resRequest.body
       if !parseStudies()
         logger.error( "ReadStudies: parseStudies FAILED" )
+      end
+      return true
+    end
+
+    return false
+  end
+
+
+  def ReadTagTypes
+    # Get a list of sensor types
+    resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=tag_type" )
+    if resRequest.kind_of?( Net::HTTPSuccess )
+      @tagTypesBody = resRequest.body
+      #logger.info( "ReadTagTypes: tagTypesBody: #{@tagTypesBody}")
+      if !parseTagTypes()
+        logger.error( "ReadTagTypes: parseTagTypes FAILED" )
+      end
+      return true
+    end
+
+    return false
+  end
+
+
+  def ReadTaxonomies
+    resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=taxon" )
+    if resRequest.kind_of?( Net::HTTPSuccess )
+      @taxonomiesBody = resRequest.body
+      #logger.info( "ReadTaxonomies: taxonomiesBody: #{@taxonomiesBody}")
+      if !parseTaxonomies()
+        logger.error( "ReadTaxonomies: parseTaxonomies FAILED" )
       end
       return true
     end
@@ -167,6 +191,35 @@ class MovebankAPI
   end
 
 
+  def PrintTagTypes()
+    if !@tagTypesParsed
+      if !parseTagTypes()
+        logger.error( "PrintTagTypes: parseTagTypes FAILED" )
+      end
+    end
+
+    @tagTypesParsed.each_value do |oneTagType|
+      logger.info( "PrintTagTypes: id=#{oneTagType.field( KTagTypeKeyID )}  is_location_sensor: #{oneTagType.field( KTagTypeKeyIsLocationSensor )}  name: #{oneTagType.field( KTagTypeKeyName )}" )
+    end
+  end
+
+
+  def PrintTaxonomies( descFilterIn )
+    if !@taxonomiesParsed
+      if !parseTaxonomies()
+        logger.error( "PrintTaxonomies: parseTaxonomies FAILED" )
+      end
+    end
+
+    @taxonomiesParsed.each_value do |oneTaxonomy|
+      offset  = oneTaxonomy.field( KTaxonomnyKeyCanonicalName ).match( /#{descFilterIn}/i )
+      if offset
+        logger.info( "PrintTaxonomies: matching #{descFilterIn}  id=#{oneTaxonomy.field( KTaxonomyKeyID )}  canonical: #{oneTaxonomy.field( KTaxonomnyKeyCanonicalName )}" )
+      end
+    end
+  end
+
+
   private
 
   def submitRequest( urlStringIn )
@@ -207,8 +260,6 @@ class MovebankAPI
     entityType  = KEntityTypeNone
 
     asLines.each do |oneLine|
-      #logger.info( "parseState: #{parseState}  oneLine: #{oneLine}")
-
       case parseState
       when KParseStateNone
         # Looking for Output "entity-type"
@@ -222,8 +273,6 @@ class MovebankAPI
           parseState  = KParseStateEntityType
           entityType  = asPair[1]
           logger.info( "parseState: #{parseState}  entityType=#{entityType}")
-        # else
-        #   logger.info( "parseState: #{parseState}  dump and continue: #{oneLine}")
         end
 
       when KParseStateEntityType
@@ -231,7 +280,6 @@ class MovebankAPI
         if oneLine.start_with?( KLinePrefixOutputAttrs )
           attrsString = oneLine[ KLinePrefixOutputAttrs.length..-1 ]
           attrsList   = attrsString.split( "," ).map( &:strip )
-          #logger.info( "KLinePrefixOutputAttrs - attrsList: #{attrsList}")
           @attributesParsed[ entityType ] = { KKeyOutputAttributes => attrsList }
           parseState  = KParseStateOutputAttributes
         else
@@ -244,14 +292,12 @@ class MovebankAPI
         if oneLine.start_with?( KLinePrefixFilterAttrs )
           attrsString = oneLine[ KLinePrefixFilterAttrs.length..-1 ]
           attrsList   = attrsString.split( "," ).map( &:strip )
-          #logger.info( "KLinePrefixFilterAttrs - attrsList: #{attrsList}")
           @attributesParsed[ entityType ][ KKeyFilterAttributes ] = attrsList
           parseState  = KParseStateNone
         else
           logger.error( "parseAttributes: expecting Filter attributes, UNEXPECTED oneLine=#{oneLine}" )
           parseState  = KParseStateNone
         end
-
       end
     end
 
@@ -266,105 +312,60 @@ class MovebankAPI
     end
 
     @studiesParsed = {}
-    # logger.info( "parseStudies: studiesBody: #{@studiesBody}" )
-    # return false
 
-    #asLines = @studiesBody.split( /\n/ )
-    # bDidFirstLine = false
     CSV.parse( @studiesBody, headers: true ) do |row|
-      # use row here...
-      #logger.info( "parseStudies: row: #{row}" )
-      # if !bDidFirstLine
-        # logger.info( "parseStudies: first row: #{row}" )
-      # logger.info( "parseStudies: first row.inspect: #{row.inspect}" )
-        # bDidFirstLine = true
-      # else
-      # end
       logger.debug( "parseStudies: row.id: #{row[ KStudyKeyID ]}" )
       @studiesParsed[ row[ KStudyKeyID ]]  = row
     end
 
     logger.info( "parseStudies: studiesParsed.length: #{@studiesParsed.length}" )
     return true
-    # CSV.foreach( data_file, headers: true) do |row|
-    #   puts row.inspect # hash
-    # end
-  
-    # keys = ['time', etc... ]
-    # CSV.parse(test).map {|a| Hash[ keys.zip(a) ] }
-    # asLines = @attributesBody.split( /\n/ )
-    # parseState  = KParseStateNone
-    # entityType  = KEntityTypeNone
+  end
 
-    # asLines.each do |oneLine|
-    #   #logger.info( "parseState: #{parseState}  oneLine: #{oneLine}")
 
-    #   case parseState
-    #   when KParseStateNone
-    #     # Looking for Output "entity-type"
-    #     if oneLine.start_with?( KLinePrefixEntityType )
-    #       # entity-type=study
-    #       asPair  = oneLine.split( "=" )
-    #       if 2 != asPair.length()
-    #         logger.error( "parseAttributes: MALFORMED asPair=#{asPair}" )
-    #       end
+  def parseTagTypes
+    if !@tagTypesBody
+      @tagTypesParsed = nil
+      return false
+    end
 
-    #       parseState  = KParseStateEntityType
-    #       entityType  = asPair[1]
-    #       logger.info( "parseState: #{parseState}  entityType=#{entityType}")
-    #     # else
-    #     #   logger.info( "parseState: #{parseState}  dump and continue: #{oneLine}")
-    #     end
+    @tagTypesParsed = {}
 
-    #   when KParseStateEntityType
-    #     # We saw the entity-type line, now looking for "Output attributes"
-    #     if oneLine.start_with?( KLinePrefixOutputAttrs )
-    #       attrsString = oneLine[ KLinePrefixOutputAttrs.length..-1 ]
-    #       attrsList   = attrsString.split( "," ).map( &:strip )
-    #       #logger.info( "KLinePrefixOutputAttrs - attrsList: #{attrsList}")
-    #       @attributesParsed[ entityType ] = { KKeyOutputAttributes => attrsList }
-    #       parseState  = KParseStateOutputAttributes
-    #     else
-    #       logger.error( "parseAttributes: expecting Output attributes, UNEXPECTED oneLine=#{oneLine}" )
-    #       parseState  = KParseStateNone
-    #     end
+    CSV.parse( @tagTypesBody, headers: true ) do |row|
+      logger.debug( "parseTagTypes: row.id: #{row[ KTagTypeKeyID ]}" )
+      @tagTypesParsed[ row[ KTagTypeKeyID ]]  = row
+    end
 
-    #   when KParseStateOutputAttributes
-    #     # We saw the Output Attributes line, now looking for "Filter attributes"
-    #     if oneLine.start_with?( KLinePrefixFilterAttrs )
-    #       attrsString = oneLine[ KLinePrefixFilterAttrs.length..-1 ]
-    #       attrsList   = attrsString.split( "," ).map( &:strip )
-    #       #logger.info( "KLinePrefixFilterAttrs - attrsList: #{attrsList}")
-    #       @attributesParsed[ entityType ][ KKeyFilterAttributes ] = attrsList
-    #       parseState  = KParseStateNone
-    #     else
-    #       logger.error( "parseAttributes: expecting Filter attributes, UNEXPECTED oneLine=#{oneLine}" )
-    #       parseState  = KParseStateNone
-    #     end
+    logger.info( "parseTagTypes: tagTypesParsed.length: #{@tagTypesParsed.length}" )
+    return true
+  end
 
-    #   end
-    # end
 
-    # return true
+  def parseTaxonomies
+    if !@taxonomiesBody
+      @taxonomiesParsed = nil
+      return false
+    end
+
+    @taxonomiesParsed = {}
+
+    CSV.parse( @taxonomiesBody, headers: true ) do |row|
+      logger.debug( "parseTaxonomies: row.id: #{row[ KTaxonomyKeyID ]}" )
+      @taxonomiesParsed[ row[ KTaxonomyKeyID ]]  = row
+    end
+
+    logger.info( "parseTaxonomies: taxonomiesParsed.length: #{@taxonomiesParsed.length}" )
+    return true
   end
 end
 
 
-# def another_hello
-#   puts "Hello World (from a method)"
-# end
+##############################################################################
+# main start
+##############################################################################
 
-# logger = Logger.new( STDOUT )
 logger  = Logging.logger_for( "main" )
-#logger.info( "main: hello" )
-# logger.level = Logger::INFO
 
-# c = MyClass.new
-# c.say_hello
-# another_hello
-
-# myConfig  = { "movebank" => { "user" => "",
-#                             "password" => "" }}
 configFilePath  = ""
 
 ARGV.each do |oneArg|
@@ -373,11 +374,6 @@ ARGV.each do |oneArg|
     logger.error( "MALFORMED oneArg: #{oneArg}" )
     logger.error( "      all arguments should be \"key=value\"" )
   else
-    # logger.info( "main: oneArg: #{oneArg}" )
-    # if asPair[0] == "u"
-    #   myConfig[ "movebank" ][ "user" ]  = asPair[1]
-    # elsif asPair[0] == "p"
-    #   myConfig[ "movebank" ][ "password" ]  = asPair[1]
     if asPair[0] == "config"
       configFilePath  = asPair[1]
     else
@@ -386,19 +382,16 @@ ARGV.each do |oneArg|
   end
 end
 
-#logger.info( "myConfig: #{myConfig}" )
-# myConfig  = ParseConfig.new( configFilePath )
-# user = config.get_value(‘user’)
-# pass = config.get_value(‘pass’)
-# log_file = config.get_value(‘log_file’)
 logger.info( "load config from configFilePath=#{configFilePath}" )
 Config.load_and_set_settings( configFilePath )
 logger.info( "Settings.username: #{Settings.username}" )
 logger.info( "Settings.password: #{Settings.password}" )
 logger.info( "Settings.functions.attributes: #{Settings.functions.attributes}" )
+logger.info( "Settings.functions.studies:    #{Settings.functions.studies}" )
+logger.info( "Settings.functions.tagtypes:   #{Settings.functions.tagtypes}" )
+logger.info( "Settings.functions.taxonomies: #{Settings.functions.taxonomies}" )
 
 
-#mvbank  = MovebankAPI.new( myConfig[ "movebank" ][ "user" ], myConfig[ "movebank" ][ "password" ])
 mvbank  = MovebankAPI.new( Settings.username, Settings.password )
 
 if 0 != Settings.functions.attributes
@@ -432,7 +425,7 @@ end
 
 if 0 != Settings.functions.taxonomies
   if mvbank.ReadTaxonomies()
-    mvbank.PrintTaxonomies()
+    mvbank.PrintTaxonomies( "florida" )
   else
     logger.info( "mvbank.ReadTaxonomies: FAILED" )
   end
