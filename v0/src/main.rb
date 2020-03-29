@@ -6,8 +6,18 @@ require 'net/http'
 #     puts "Hello World"
 #   end
 # end
-class MovementAPI
+class MovebankAPI
+  def initialize( usernameIn, passwordIn )
+    @mvbUsername  = usernameIn
+    @mvbPassword  = passwordIn
+  end
+
+
+  def ReadAttributes
+    curl -v -u dlevers:stANley6 -b cookies.txt -o attribute_names.txt "https://www.movebank.org/movebank/service/direct-read?attributes"
+  end
 end
+
 
 # def another_hello
 #   puts "Hello World (from a method)"
@@ -20,8 +30,8 @@ logger.info( "main: hello" )
 # c.say_hello
 # another_hello
 
-myConfig  = { "user" => "",
-            "password" => "" }
+myConfig  = { "movebank" => { "user" => "",
+                            "password" => "" }}
 
 ARGV.each do |oneArg|
   asPair  = oneArg.split("=")
@@ -31,9 +41,9 @@ ARGV.each do |oneArg|
   else
     # logger.info( "main: oneArg: #{oneArg}" )
     if asPair[0] == "u"
-      myConfig[ "user" ]  = asPair[1]
+      myConfig[ "movebank" ][ "user" ]  = asPair[1]
     elsif asPair[0] == "p"
-      myConfig[ "password" ]  = asPair[1]
+      myConfig[ "movebank" ][ "password" ]  = asPair[1]
     else
       logger.error( "main: UNKNOWN oneArg: #{oneArg}" )
     end
@@ -41,3 +51,7 @@ ARGV.each do |oneArg|
 end
 
 logger.info( "main: myConfig: #{myConfig}" )
+
+mvmt  = MovebankAPI.new( myConfig[ "movebank" ][ "user" ], myConfig[ "movebank" ][ "password" ])
+
+mvmt.ReadAttributes()
