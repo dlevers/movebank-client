@@ -1,3 +1,4 @@
+require 'json'
 require 'logger'
 require 'net/http'
 
@@ -32,9 +33,21 @@ end
 class MovebankAPI
   include Logging
 
+  KEntityTypeNone = "none"
+  KKeyOutputAttributes    = "OutputAttributes"
+  KKeyFilterAttributes    = "FilterAttributes"
+  KLinePrefixEntityType   = "entity-type"
+  KLinePrefixOutputAttrs  = "Output attributes:"
+  KLinePrefixFilterAttrs  = "Filter attributes:"
+  KParseStateNone             = "none"
+  KParseStateEntityType       = "entity-type"
+  KParseStateOutputAttributes = "output-attributes"
+
   def initialize( usernameIn, passwordIn )
-    @mvbUsername  = usernameIn
-    @mvbPassword  = passwordIn
+    @mvbUsername    = usernameIn
+    @mvbPassword    = passwordIn
+    @attributesBody = ""
+    @attributesParsed = nil
   end
 
 
@@ -51,7 +64,98 @@ class MovebankAPI
                             :use_ssl => uri.scheme == 'https' ) { |http|
       http.request( req )
     }
-    logger.info( "resGet.body: #{resGet.body}" )
+
+    bSuccess = false
+    case resGet
+      when Net::HTTPSuccess
+        @attributesBody = resGet.body
+        bSuccess = true
+      when Net::HTTPUnauthorized
+        logger.error( "ReadAttributes: FAILED.HTTPUnauthorized - username and password set and correct?" )
+      when Net::HTTPServerError
+        logger.error( "ReadAttributes: FAILED.HTTPServerError - try again later?" )
+      else
+        logger.error( "ReadAttributes: FAILED.(unknown) - #{response.message}" )
+    end
+
+    return bSuccess
+  end
+
+
+  def PrintAttributes
+    if !@attributesParsed
+      if !parseAttributes()
+        logger.error( "PrintAttributes: parseAttributes FAILED" )
+      end
+    end
+
+    logger.info( "PrintAttributes: attributesParsed: #{@attributesParsed.to_json}")
+  end
+
+
+  private
+
+  def parseAttributes
+    if !@attributesBody
+      @attributesParsed = nil
+      return false
+    end
+
+    @attributesParsed = {}
+    asLines = @attributesBody.split( /\n/ )
+    parseState  = KParseStateNone
+    entityType  = KEntityTypeNone
+
+    asLines.each do |oneLine|
+      #logger.info( "parseState: #{parseState}  oneLine: #{oneLine}")
+
+      case parseState
+      when KParseStateNone
+        # Looking for Output "entity-type"
+        if oneLine.start_with?( KLinePrefixEntityType )
+          # entity-type=study
+          asPair  = oneLine.split( "=" )
+          if 2 != asPair.length()
+            logger.error( "parseAttributes: MALFORMED asPair=#{asPair}" )
+          end
+
+          parseState  = KParseStateEntityType
+          entityType  = asPair[1]
+          logger.info( "parseState: #{parseState}  entityType=#{entityType}")
+        # else
+        #   logger.info( "parseState: #{parseState}  dump and continue: #{oneLine}")
+        end
+
+      when KParseStateEntityType
+        # We saw the entity-type line, now looking for "Output attributes"
+        if oneLine.start_with?( KLinePrefixOutputAttrs )
+          attrsString = oneLine[ KLinePrefixOutputAttrs.length..-1 ]
+          attrsList   = attrsString.split( "," ).map( &:strip )
+          #logger.info( "KLinePrefixOutputAttrs - attrsList: #{attrsList}")
+          @attributesParsed[ entityType ] = { KKeyOutputAttributes => attrsList }
+          parseState  = KParseStateOutputAttributes
+        else
+          logger.error( "parseAttributes: expecting Output attributes, UNEXPECTED oneLine=#{oneLine}" )
+          parseState  = KParseStateNone
+        end
+
+      when KParseStateOutputAttributes
+        # We saw the Output Attributes line, now looking for "Filter attributes"
+        if oneLine.start_with?( KLinePrefixFilterAttrs )
+          attrsString = oneLine[ KLinePrefixFilterAttrs.length..-1 ]
+          attrsList   = attrsString.split( "," ).map( &:strip )
+          #logger.info( "KLinePrefixFilterAttrs - attrsList: #{attrsList}")
+          @attributesParsed[ entityType ][ KKeyFilterAttributes ] = attrsList
+          parseState  = KParseStateNone
+        else
+          logger.error( "parseAttributes: expecting Filter attributes, UNEXPECTED oneLine=#{oneLine}" )
+          parseState  = KParseStateNone
+        end
+
+      end
+    end
+
+    return true
   end
 end
 
@@ -90,6 +194,10 @@ end
 
 logger.info( "myConfig: #{myConfig}" )
 
-mvmt  = MovebankAPI.new( myConfig[ "movebank" ][ "user" ], myConfig[ "movebank" ][ "password" ])
+mvbank  = MovebankAPI.new( myConfig[ "movebank" ][ "user" ], myConfig[ "movebank" ][ "password" ])
 
-mvmt.ReadAttributes()
+if mvbank.ReadAttributes()
+  mvbank.PrintAttributes()
+else
+  logger.info( "mvbank.ReadAttributes: FAILED" )
+end
