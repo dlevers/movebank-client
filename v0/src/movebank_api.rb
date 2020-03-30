@@ -1,3 +1,6 @@
+require 'net/http'
+
+
 class MovebankAPI
     include Logging
 
@@ -29,6 +32,7 @@ class MovebankAPI
     # acknowledgements,citation,create_ts,event_grace_period,go_public_date,go_public_license_type,grants_used,has_quota,i_am_owner,id,is_test,license_terms,license_type,main_location_lat,main_location_long,name,number_of_deployments,number_of_individuals,number_of_tags,principal_investigator_address,principal_investigator_email,principal_investigator_name,study_objective,study_type,suspend_go_public_date,suspend_license_terms,i_can_see_data,there_are_data_which_i_cannot_see,timestamp_first_deployed_location,timestamp_last_deployed_location,number_of_deployed_locations,taxon_ids,sensor_type_ids
     KKeyStudyStudy  = "study"
     KKeyStudyTags   = "tags"
+    KKeyStudyEvents = "events"
 
     # For TagTypes
     # description,external_id,id,is_location_sensor,name
@@ -37,6 +41,13 @@ class MovebankAPI
     KTagTypeKeyName             = "name"
     # For (single) Study
     KTagTypeKeyLocalIdentifier  = "local_identifier"
+
+    # For Events
+    KEventKeyIndividual = "individual_id"
+    KEventKeyLatitude   = "location_lat"
+    KEventKeyLongitude  = "location_long"
+    KEventKeyTagID      = "tag_id"
+    KEventKeyTimestamp  = "timestamp"
 
     # For Taxonomies
     # author_string,canonical_name,external_id,hierarchy_string,id,name_1,name_2,name_3,tsn,valid
@@ -98,11 +109,6 @@ class MovebankAPI
       resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=study&study_id=#{studyIDin}" )
       if resRequest.kind_of?( Net::HTTPSuccess )
         @studyBodies[ studyIDin ][ KKeyStudyStudy ] = resRequest.body
-        #logger.info( "ReadStudy: studyIDin=#{studyIDin}  studyBody: #{ @studyBodies[ studyIDin ]}")
-        # if !parseStudy( studyIDin )
-        #   logger.error( "ReadStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
-        # end
-        # return true
       else
         logger.error( "ReadStudy: studyIDin=#{studyIDin}  description FAILED")
         return false
@@ -112,13 +118,17 @@ class MovebankAPI
       resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=tag&study_id=#{studyIDin}" )
       if resRequest.kind_of?( Net::HTTPSuccess )
         @studyBodies[ studyIDin ][ KKeyStudyTags ] = resRequest.body
-        #logger.info( "ReadStudy: studyIDin=#{studyIDin}  studyBody: #{ @studyBodies[ studyIDin ]}")
-        # if !parseStudy( studyIDin )
-        #   logger.error( "ReadStudy: studyIDin=#{studyIDin}  parseStudy FAILED" )
-        # end
-        # return true
       else
-        logger.error( "ReadStudy: studyIDin=#{studyIDin}  description FAILED")
+        logger.error( "ReadStudy: studyIDin=#{studyIDin}  tags FAILED")
+        return false
+      end
+
+      # Get event data from a study
+      resRequest  = submitRequest( "https://www.movebank.org/movebank/service/direct-read?entity_type=event&study_id=#{studyIDin}" )
+      if resRequest.kind_of?( Net::HTTPSuccess )
+        @studyBodies[ studyIDin ][ KKeyStudyEvents ] = resRequest.body
+      else
+        logger.error( "ReadStudy: studyIDin=#{studyIDin}  events FAILED")
         return false
       end
 
@@ -228,6 +238,19 @@ class MovebankAPI
       logger.info( "PrintStudy: studyIDin=#{studyIDin}: tagsOfInterest count=#{tagsOfInterest.length}" )
       tagsOfInterest.each_value do |oneTag|
         logger.debug( "                      oneTag.id=#{oneTag.field( KTagTypeKeyID )}  local_identifier: #{oneTag.field( KTagTypeKeyLocalIdentifier )}" )
+      end
+
+      eventsOfInterest  = @studyParses[ studyIDin ][ KKeyStudyEvents ]
+      kLimit            = 10
+      countPrinted      = 0
+      logger.info( "PrintStudy: studyIDin=#{studyIDin}: eventsOfInterest count=#{eventsOfInterest.length}  (print up to #{kLimit})" )
+      eventsOfInterest.each do |oneEvent|
+        # |timestamp               | location_lat| location_long| individual_id|  tag_id|
+        logger.info( "                      oneEvent.timestamp=#{oneEvent.field( KEventKeyTimestamp )}  lat=#{oneEvent.field( KEventKeyLatitude )}  long=#{oneEvent.field( KEventKeyLongitude )}  invidual=#{oneEvent.field( KEventKeyIndividual )}  tag=#{oneEvent.field( KEventKeyTagID )}" )
+        countPrinted += 1
+        if countPrinted >= kLimit
+          break
+        end
       end
     end
 
@@ -382,6 +405,13 @@ class MovebankAPI
         logger.debug( "parseStudy: KKeyStudyTags  studyIDin=#{studyIDin}  row.id: #{row[ KStudyKeyID ]}" )
         @studyParses[ studyIDin ][ KKeyStudyTags ][ row[ KStudyKeyID ]] = row
       end
+
+      @studyParses[ studyIDin ][ KKeyStudyEvents ]  = []
+      CSV.parse( @studyBodies[ studyIDin ][ KKeyStudyEvents ], headers: true ) do |row|
+        #logger.info( "parseStudy: KKeyStudyEvents  studyIDin=#{studyIDin}  row.id: #{row[ KEventKeyTagID ]}" )
+        @studyParses[ studyIDin ][ KKeyStudyEvents ].push( row )
+      end
+
 
       # logger.info( "parseStudies: studiesParsed.length: #{@studiesParsed.length}" )
       return true
